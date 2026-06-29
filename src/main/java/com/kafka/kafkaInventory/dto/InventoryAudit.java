@@ -17,7 +17,6 @@ public class InventoryAudit {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-
     private String productId;
     private int delta;
     private String reason;
