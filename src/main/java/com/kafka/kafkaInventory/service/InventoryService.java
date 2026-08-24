@@ -1,62 +1,147 @@
 package com.kafka.kafkaInventory.service;
 
-
-import com.kafka.kafkaInventory.dto.InventoryAudit;
-import com.kafka.kafkaInventory.dto.InventoryEvent;
-import com.kafka.kafkaInventory.repository.InventoryAuditRepository;
+import com.kafka.kafkaInventory.dto.*;
+import com.kafka.kafkaInventory.exception.InsufficientInventoryException;
+import com.kafka.kafkaInventory.exception.InventoryNotFoundException;
+import com.kafka.kafkaInventory.model.Inventory;
 import com.kafka.kafkaInventory.repository.InventoryRepository;
-import com.kafka.kafkaInventory.request.InventoryUpdateRequest;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.UUID;
+import java.util.List;
 
 @Service
-@Transactional
 public class InventoryService {
 
     private final InventoryRepository inventoryRepository;
-    private final InventoryAuditRepository inventoryAuditRepository;
-    private final InventoryProducer inventoryProducer;
 
-    Logger logger = LoggerFactory.getLogger(InventoryService.class);
 
-    public InventoryService(InventoryRepository inventoryRepository, InventoryAuditRepository inventoryAuditRepository, InventoryProducer inventoryProducer) {
+    public InventoryService(InventoryRepository inventoryRepository){
+
         this.inventoryRepository = inventoryRepository;
-        this.inventoryAuditRepository = inventoryAuditRepository;
-        this.inventoryProducer = inventoryProducer;
     }
 
-    public void updateStock(String productId, InventoryUpdateRequest request)
-    {
-        int rows = inventoryRepository.updateByProductId(productId, request.getDelta());
+    public InventoryResponse getInventory(String productId){
 
-        if (rows > 0) {
-            logger.info("Inventory updated for {}", productId);
-        } else {
-            logger.warn("Inventory NOT FOUND for {}", productId);
+        Inventory inventory = inventoryRepository.findByProductId(productId)
+                .orElseThrow(() ->
+                        new InventoryNotFoundException(
+                                "Inventory not found for product: " + productId
+                        ));
+
+        return toResponse(inventory);
+
+    }
+
+    public List<InventoryResponse> getAllInventory(){
+
+        return inventoryRepository.findAll()
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    /*
+     * PUT semantics:
+     * Replace the current quantity with an exact value.
+     *
+     * Example:
+     * Current quantity = 100
+     * Request quantity = 50
+     * Final quantity = 50
+     */
+    @Transactional
+    public InventoryResponse replaceInventory(String productId,
+                                              InventoryReplaceRequest request){
+
+        Inventory inventory = inventoryRepository.findByProductId(productId)
+                .orElseThrow(() ->
+                        new InventoryNotFoundException(
+
+                                "Inventory not found for product: "+ productId
+
+                        ));
+
+        inventory.setQuantity(request.quantity());
+        Inventory savedInventory = inventoryRepository.save(inventory);
+
+        return toResponse(savedInventory);
+    }
+
+    /*
+     * PATCH semantics:
+     * Increment or decrement the current quantity.
+     *
+     * Example:
+     * Current quantity = 100
+     * delta = -10
+     * Final quantity = 90
+     */
+    @Transactional
+    public InventoryUpdateResponse adjustInventory(
+            String productId,
+            InventoryUpdateRequest request){
+
+        Inventory inventory = inventoryRepository.findByProductId(productId)
+                .orElseThrow(() ->
+                        new InventoryNotFoundException(
+                                "Inventory not found for product: "+ productId
+                        ));
+
+        int newQuantity =
+                inventory.getQuantity() + request.delta();
+
+        if (newQuantity < 0){
+
+            throw new InsufficientInventoryException(
+                    "Insufficient inventory for product: " + productId
+            );
         }
+        inventory.setQuantity(newQuantity);
+        inventoryRepository.save(inventory);
 
-        InventoryAudit inventoryAudit = new InventoryAudit();
-        inventoryAudit.setProductId(productId);
-        inventoryAudit.setDelta(request.getDelta());
-        inventoryAudit.setReason(request.getReason());
-        inventoryAudit.setSource(request.getSource());
-        inventoryAudit.setTimestamp(request.getTimestamp());
+        return new InventoryUpdateResponse(
+                "updated",
+                productId,
+                request.delta(),
+                newQuantity
+        );
 
-        inventoryAuditRepository.save(inventoryAudit);
-        logger.info("✅ saved Audit details to DB: " + productId);
+    }
 
-        InventoryEvent event = new InventoryEvent(
-                UUID.randomUUID().toString(),
-                productId, request.getDelta(),
-                System.currentTimeMillis());
+    @Transactional
+    public void deleteById(Long id){
 
-        inventoryProducer.sendEvent(event);
-        logger.info("✅ Updated inventory using PATCH for: " + productId);
+        if (!inventoryRepository.existsById(id)){
+
+            throw new InventoryNotFoundException(
+                    "Inventory not found with id: " + id
+            );
+        }
+        inventoryRepository.deleteById(id);
+    }
+    @Transactional
+    public InventoryResponse createInventory(
+            InventoryCreateRequest request) {
+
+        Inventory inventory = new Inventory(request.productId(),
+                request.quantity());
+
+        Inventory savedInventory =
+                inventoryRepository.save(inventory);
+
+        return toResponse(savedInventory);
+    }
 
 
+
+    private InventoryResponse toResponse(
+            Inventory inventory) {
+
+        return new InventoryResponse(
+                inventory.getId(),
+                inventory.getProductId(),
+                inventory.getQuantity()
+        );
     }
 }

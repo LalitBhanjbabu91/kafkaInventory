@@ -13,8 +13,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class InventoryConsumer {
 
-    private InventoryRepository inventoryRepository;
-    private ObjectMapper mapper;
+    private final InventoryRepository inventoryRepository;
+    private final ObjectMapper mapper;
     private static final Logger logger = LoggerFactory.getLogger(InventoryConsumer.class);
 
     public InventoryConsumer(InventoryRepository inventoryRepository, ObjectMapper mapper) {
@@ -22,13 +22,17 @@ public class InventoryConsumer {
         this.mapper = mapper;
     }
 
-    @KafkaListener(topics = KafkaConstants.KAFKA_TOPIC, groupId = KafkaConstants.KAFKA_GROUP_ID)
+    @KafkaListener(topics = KafkaConstants.KAFKA_TOPIC,
+            groupId = KafkaConstants.KAFKA_GROUP_ID)
     public void consume(ConsumerRecord<String, String> record) {
         try {
-            logger.info("Kafka Topic is -> "+KafkaConstants.KAFKA_TOPIC+" Kafka group id is -> "+KafkaConstants.KAFKA_GROUP_ID);
+            logger.info("Kafka Topic is -> "+KafkaConstants.KAFKA_TOPIC+
+                    " Kafka group id is -> "+KafkaConstants.KAFKA_GROUP_ID);
+
             logger.info("Partition: {}, Offset: {}",
                     record.partition(),
                     record.offset());
+
             //System.out.println("📩 RAW MESSAGE FROM KAFKA: " + message);
             logger.info("Consumer = {}, Partition = {}, Offset = {}",
                     Thread.currentThread().getName(),
@@ -42,10 +46,19 @@ public class InventoryConsumer {
 
             InventoryEvent event = mapper.readValue(record.value(), InventoryEvent.class);
 
-            logger.info("⚙️ Processing event: {} delta={}",
+            logger.info("Processing event: {} delta={}",
                     event.getProductId(),
                     event.getDelta());
-//            System.out.println("⚙️ Processing event: " + event.getProductId()
+
+            logger.info(
+                    "Consumed inventory event: productId={}, delta={}, partition={}, offset={}",
+                    event.getProductId(),
+                    event.getDelta(),
+                    record.partition(),
+                    record.offset()
+            );
+
+//            System.out.println("Processing event: " + event.getProductId()
 //                    + " delta=" + event.getDelta());
 
             //store.applyDelta(event.getProductId(), event.getDelta());
@@ -58,12 +71,14 @@ public class InventoryConsumer {
                     event.getProductId(), event.getDelta()
             );
 
-            logger.info("✅ Updated inventory for: " + event.getProductId());
-            //System.out.println("✅ Updated inventory for: " + event.getProductId());
+            logger.info(
+                    "Inventory updated for productId={}",
+                    event.getProductId()
+            );
 
         } catch (Exception e) {
-            logger.info("❌ Error processing Kafka message");
-            //System.err.println("❌ Error processing Kafka message");
+            logger.info("Error processing Kafka message", e);
+
             e.printStackTrace();
         }
     }

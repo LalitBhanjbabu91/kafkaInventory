@@ -6,7 +6,6 @@ import lombok.*;
 
 @Entity
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@AllArgsConstructor
 @Getter
 @Setter
 @Table(name = "inventory")
@@ -20,5 +19,11 @@ public class Inventory {
     private String productId;
 
     private int quantity;
+
+    public Inventory(String productId, int quantity){
+
+        this.productId = productId;
+        this.quantity = quantity;
+    }
 
 }

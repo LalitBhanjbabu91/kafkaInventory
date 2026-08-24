@@ -1,38 +1,38 @@
 package com.kafka.kafkaInventory.controller;
 
-import com.kafka.kafkaInventory.dto.InventoryEvent;
-import com.kafka.kafkaInventory.model.InventoryStore;
-import com.kafka.kafkaInventory.request.InventoryUpdateRequest;
-import com.kafka.kafkaInventory.repository.InventoryRepository;
-import com.kafka.kafkaInventory.service.InventoryService;
+
+import com.kafka.kafkaInventory.dto.*;
 import com.kafka.kafkaInventory.service.InventoryProducer;
+import com.kafka.kafkaInventory.service.InventoryService;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import java.util.Map;
+
+import java.util.List;
 import java.util.UUID;
 
 @RestController
 @RequestMapping("/inventory")
 public class InventoryController {
 
-    private final InventoryRepository inventoryRepository;
-    private final InventoryProducer producer;
-    private final InventoryStore store;
+    private final InventoryProducer inventoryProducer;
     private final InventoryService inventoryService;
 
+    public InventoryController(InventoryProducer inventoryProducer,
+                               InventoryService inventoryService){
 
-    public InventoryController(InventoryRepository inventoryRepository, InventoryProducer producer, InventoryStore store, InventoryService inventoryService) {
-        this.inventoryRepository = inventoryRepository;
-        this.producer = producer;
-        this.store = store;
+        this.inventoryProducer = inventoryProducer;
         this.inventoryService = inventoryService;
+
     }
 
-    // Send event to Kafka
+    // Publish inventory event to Kafka
     @PostMapping("/event")
-    public Map<String, String> publish(@RequestBody InventoryEvent event) {
+    public ResponseEntity<InventoryEvent> publishEvent(@RequestBody InventoryEvent event){
 
-        // ensure eventId exists
-        if (event.getEventId() == null) {
+
+        if (event.getEventId() == null){
             event = new InventoryEvent(
                     UUID.randomUUID().toString(),
                     event.getProductId(),
@@ -41,64 +41,78 @@ public class InventoryController {
             );
         }
 
-        producer.sendEvent(event);
-
-        return Map.of(
-                "status", "sent",
-                "eventId", event.getEventId()
-        );
+        inventoryProducer.sendEvent(event);
+        return ResponseEntity.accepted().body(event);
     }
 
-    // Get inventory
+    // Get inventory by productId
     @GetMapping("/{productId}")
-    public Map<String, Object> getStock(@PathVariable String productId) {
-        return Map.of(
-                "productId", productId,
-                "stock", store.getStock(productId)
+    public ResponseEntity<InventoryResponse> getInventory(@PathVariable String productId){
+
+
+        InventoryResponse response =
+                inventoryService.getInventory(productId);
+
+        return ResponseEntity.ok(response);
+    }
+
+    // Get all inventory
+    @GetMapping
+    public ResponseEntity<List<InventoryResponse>> getAllInventory(){
+
+        return ResponseEntity.ok(
+                inventoryService.getAllInventory()
         );
 
     }
-    @GetMapping("/all")
-    public Map<String, Object> getAll() {
-        return Map.of("stocks", inventoryRepository.findAll());
+    // PUT = set quantity to an exact value
+    @PutMapping("/{productId}")
+    public ResponseEntity<InventoryResponse> replaceInventory(
+            @PathVariable String productId,
+            @Valid @RequestBody InventoryReplaceRequest request) {
+
+        InventoryResponse response =
+                inventoryService.replaceInventory(
+                        productId,
+                        request
+                );
+
+        return ResponseEntity.ok(response);
+    }
+
+    // PATCH = increment/decrement existing quantity
+    @PatchMapping("/{productId}")
+    public ResponseEntity<InventoryUpdateResponse> adjustInventory(
+            @PathVariable String productId,
+            @RequestBody InventoryUpdateRequest request) {
+
+        InventoryUpdateResponse response =
+                inventoryService.adjustInventory(
+                        productId,
+                        request
+                );
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping
+    public ResponseEntity<InventoryResponse> createInventory(
+            @Valid @RequestBody InventoryCreateRequest request) {
+
+        InventoryResponse response =
+                inventoryService.createInventory(request);
+
+        return ResponseEntity
+                .status(HttpStatus.CREATED)
+                .body(response);
     }
 
     @DeleteMapping("/{id}")
-    public Map<String, Object> deleteById(@PathVariable  Long id){
+    public ResponseEntity<Void> deleteInventory(@PathVariable Long id){
 
-        inventoryRepository.deleteById(id);
-        return Map.of("status", "deleted", "id", String.valueOf(id));
-    }
+        inventoryService.deleteById(id);
 
-    @PutMapping("/{id}/{delta}")
-    public Map<String, Object> updateById(@PathVariable String id, @PathVariable int delta)
-    {
-        int rows = inventoryRepository.updateByProductId(id, delta);
-
-        return Map.of(
-                "status", rows > 0 ? "updated" : "not_found",
-                "rowsAffected", rows,
-                "id", id
-        );
-    }
-    // ✅ PATCH using JSON BODY (NEW CLEAN WAY)
-    @PatchMapping("/{productId}")
-    public Map<String, Object> updateStock(@PathVariable String productId,
-                                           @RequestBody InventoryUpdateRequest request) {
-
-        inventoryService.updateStock(productId, request);
-
-        return Map.of(
-                "status", "updated",
-                "productId", productId,
-                "delta", request.getDelta(),
-                "reason", request.getReason(),
-                "source", request.getSource(),
-                "timestamp", request.getTimestamp()
-        );
-
-
-
+        return ResponseEntity.noContent().build();
     }
 
 }

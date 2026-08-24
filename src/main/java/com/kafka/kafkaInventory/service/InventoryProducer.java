@@ -13,20 +13,24 @@ import org.springframework.stereotype.Service;
 public class InventoryProducer {
 
     private final KafkaTemplate<String, String> kafkaTemplate;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
 
-    Logger logger = LoggerFactory.getLogger(InventoryProducer.class);
+    private static final Logger logger = LoggerFactory.getLogger(InventoryProducer.class);
 
-    public InventoryProducer(KafkaTemplate<String, String> kafkaTemplate) {
+    public InventoryProducer(KafkaTemplate<String, String> kafkaTemplate,
+                             ObjectMapper mapper) {
 
         this.kafkaTemplate = kafkaTemplate;
+        this.mapper = mapper;
     }
 
     public void sendEvent(InventoryEvent event) {
         try {
+
             String json = mapper.writeValueAsString(event);
             kafkaTemplate.send(KafkaConstants.KAFKA_TOPIC , event.getProductId(), json);
-            logger.info("✅ Kafka event sent from producer for: " + event.getProductId());
+            logger.info("Kafka event sent from producer for: {}", event.getProductId());
+
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
