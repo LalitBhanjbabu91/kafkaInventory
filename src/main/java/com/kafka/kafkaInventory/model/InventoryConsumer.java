@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kafka.kafkaInventory.constants.KafkaConstants;
 import com.kafka.kafkaInventory.dto.InventoryEvent;
 import com.kafka.kafkaInventory.repository.InventoryRepository;
+import com.kafka.kafkaInventory.service.InventoryAuditService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,40 +16,24 @@ public class InventoryConsumer {
 
     private final InventoryRepository inventoryRepository;
     private final ObjectMapper mapper;
+    private final InventoryAuditService inventoryAuditService;
     private static final Logger logger = LoggerFactory.getLogger(InventoryConsumer.class);
 
-    public InventoryConsumer(InventoryRepository inventoryRepository, ObjectMapper mapper) {
+    public InventoryConsumer(InventoryRepository inventoryRepository,
+                             ObjectMapper mapper,
+                             InventoryAuditService inventoryAuditService) {
         this.inventoryRepository = inventoryRepository;
         this.mapper = mapper;
+        this.inventoryAuditService = inventoryAuditService;
+
     }
 
     @KafkaListener(topics = KafkaConstants.KAFKA_TOPIC,
             groupId = KafkaConstants.KAFKA_GROUP_ID)
     public void consume(ConsumerRecord<String, String> record) {
         try {
-            logger.info("Kafka Topic is -> "+KafkaConstants.KAFKA_TOPIC+
-                    " Kafka group id is -> "+KafkaConstants.KAFKA_GROUP_ID);
-
-            logger.info("Partition: {}, Offset: {}",
-                    record.partition(),
-                    record.offset());
-
-            //System.out.println("📩 RAW MESSAGE FROM KAFKA: " + message);
-            logger.info("Consumer = {}, Partition = {}, Offset = {}",
-                    Thread.currentThread().getName(),
-                    record.partition(),
-                    record.offset());
-            logger.info("CONSUMER_INSTANCE={} GROUP={} PARTITION={} OFFSET={}",
-                    System.getProperty("server.port"),
-                    KafkaConstants.KAFKA_GROUP_ID,
-                    record.partition(),
-                    record.offset());
 
             InventoryEvent event = mapper.readValue(record.value(), InventoryEvent.class);
-
-            logger.info("Processing event: {} delta={}",
-                    event.getProductId(),
-                    event.getDelta());
 
             logger.info(
                     "Consumed inventory event: productId={}, delta={}, partition={}, offset={}",
@@ -67,19 +52,29 @@ public class InventoryConsumer {
             inventory.setQuantity(inventory.getQuantity() + event.getDelta());
 
             inventoryRepository.save(inventory);*/
-            inventoryRepository.updateByProductId(
+            int rows = inventoryRepository.updateByProductId(
                     event.getProductId(), event.getDelta()
             );
 
-            logger.info(
-                    "Inventory updated for productId={}",
-                    event.getProductId()
-            );
+            if (rows > 0){
+
+                inventoryAuditService.recordChange(event.getProductId(),
+                        event.getDelta(), "KAFKA", InventoryAction.ADJUST);
+
+                logger.info(
+                        "Inventory updated for productId={}",
+                        event.getProductId() );
+
+            }
+            else{
+                logger.warn(
+                        "Inventory not found for productId={}",
+                        event.getProductId());
+            }
 
         } catch (Exception e) {
-            logger.info("Error processing Kafka message", e);
 
-            e.printStackTrace();
+            logger.error("Error processing Kafka message", e);
         }
     }
 }

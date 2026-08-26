@@ -4,6 +4,7 @@ import com.kafka.kafkaInventory.dto.*;
 import com.kafka.kafkaInventory.exception.InsufficientInventoryException;
 import com.kafka.kafkaInventory.exception.InventoryNotFoundException;
 import com.kafka.kafkaInventory.model.Inventory;
+import com.kafka.kafkaInventory.model.InventoryAction;
 import com.kafka.kafkaInventory.repository.InventoryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,10 +16,14 @@ public class InventoryService {
 
     private final InventoryRepository inventoryRepository;
 
+    private final InventoryAuditService inventoryAuditService;
 
-    public InventoryService(InventoryRepository inventoryRepository){
+
+    public InventoryService(InventoryRepository inventoryRepository,
+                            InventoryAuditService inventoryAuditService){
 
         this.inventoryRepository = inventoryRepository;
+        this.inventoryAuditService = inventoryAuditService;
     }
 
     public InventoryResponse getInventory(String productId){
@@ -61,9 +66,15 @@ public class InventoryService {
                                 "Inventory not found for product: "+ productId
 
                         ));
+        int oldQuantity = inventory.getQuantity();
+        int newQuantity = request.quantity();
 
         inventory.setQuantity(request.quantity());
         Inventory savedInventory = inventoryRepository.save(inventory);
+
+        int delta = newQuantity - oldQuantity;
+        inventoryAuditService.recordChange(productId, delta,
+                "REST_API", InventoryAction.REPLACE);
 
         return toResponse(savedInventory);
     }
@@ -100,6 +111,9 @@ public class InventoryService {
         inventory.setQuantity(newQuantity);
         inventoryRepository.save(inventory);
 
+        inventoryAuditService.recordChange(productId, request.delta(),
+                "REST_API", InventoryAction.ADJUST);
+
         return new InventoryUpdateResponse(
                 "updated",
                 productId,
@@ -112,14 +126,20 @@ public class InventoryService {
     @Transactional
     public void deleteById(Long id){
 
-        if (!inventoryRepository.existsById(id)){
+        Inventory inventory = inventoryRepository.findById(id)
+                        .orElseThrow(() ->
 
-            throw new InventoryNotFoundException(
-                    "Inventory not found with id: " + id
-            );
-        }
-        inventoryRepository.deleteById(id);
+                                new InventoryNotFoundException(
+                                        "Inventory not found with id: " + id
+                                )
+                        );
+
+        inventoryRepository.delete(inventory);
+
+        inventoryAuditService.recordChange(inventory.getProductId(),
+                -inventory.getQuantity(), "REST_API", InventoryAction.DELETE);
     }
+
     @Transactional
     public InventoryResponse createInventory(
             InventoryCreateRequest request) {
@@ -129,6 +149,9 @@ public class InventoryService {
 
         Inventory savedInventory =
                 inventoryRepository.save(inventory);
+
+        inventoryAuditService.recordChange(request.productId(),
+                request.quantity(), "REST_API", InventoryAction.CREATE);
 
         return toResponse(savedInventory);
     }

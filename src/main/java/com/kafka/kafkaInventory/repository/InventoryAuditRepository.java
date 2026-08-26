@@ -1,6 +1,6 @@
 package com.kafka.kafkaInventory.repository;
 
-import com.kafka.kafkaInventory.dto.InventoryAudit;
+import com.kafka.kafkaInventory.model.InventoryAudit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
